@@ -1,0 +1,6 @@
+{
+  "name": "CrowdSense AI",
+  "description": "Advanced population density assessment platform using deep learning for real-time crowd distribution analysis and safety monitoring.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["AI Object Detection", "Heatmap Visualization"]
+}
