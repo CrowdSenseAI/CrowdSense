@@ -1,0 +1,27 @@
+[project]
+name = "dm-count"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.2.6",
+    "opencv-python>=4.13.0.92",
+    "pillow>=12.1.1",
+    "python-dotenv>=1.1.0",
+    "scipy>=1.15.3",
+    "torch==2.5.1+cu121",
+    "swanlab>=0.5.0",
+    "torchaudio==2.5.1+cu121",
+    "torchvision==0.20.1+cu121",
+    "swanlab>=0.7.18",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-gpu" }
+torchvision = { index = "pytorch-gpu" }
+torchaudio = { index = "pytorch-gpu" }
+
+[[tool.uv.index]]
+name = "pytorch-gpu"
+url = "https://download.pytorch.org/whl/cu121"

@@ -1,4 +1,5 @@
 import os
+import math
 import time
 import torch
 import torch.nn as nn
@@ -7,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 import numpy as np
 from datetime import datetime
+import swanlab
 
 from datasets.crowd import Crowd_qnrf, Crowd_nwpu, Crowd_sh
 from models import vgg19
@@ -18,14 +20,35 @@ import utils.log_utils as log_utils
 def train_collate(batch):
     transposed_batch = list(zip(*batch))
     images = torch.stack(transposed_batch[0], 0)
-    points = transposed_batch[1]  # the number of points is not fixed, keep it as a list of tensor
+    points = transposed_batch[1]
     gt_discretes = torch.stack(transposed_batch[2], 0)
     return images, points, gt_discretes
+
+
+class CosineWarmupScheduler:
+    def __init__(self, optimizer, warmup_epochs, total_epochs,
+                 base_lrs, min_lrs):
+        self.optimizer = optimizer
+        self.warmup_epochs = warmup_epochs
+        self.total_epochs = total_epochs
+        self.base_lrs = base_lrs
+        self.min_lrs = min_lrs
+
+    def step(self, epoch):
+        for i, param_group in enumerate(self.optimizer.param_groups):
+            if epoch < self.warmup_epochs:
+                lr = self.base_lrs[i] * (epoch + 1) / max(1, self.warmup_epochs)
+            else:
+                progress = (epoch - self.warmup_epochs) / max(1, self.total_epochs - self.warmup_epochs)
+                lr = self.min_lrs[i] + 0.5 * (self.base_lrs[i] - self.min_lrs[i]) * \
+                     (1 + math.cos(math.pi * progress))
+            param_group['lr'] = lr
 
 
 class Trainer(object):
     def __init__(self, args):
         self.args = args
+        self.current_phase = 1
 
     def setup(self):
         args = self.args
@@ -47,6 +70,10 @@ class Trainer(object):
             self.logger.info('using {} gpus'.format(self.device_count))
         else:
             raise Exception("gpu is not available")
+
+        # SwanLab will be initialized after resume detection (needs run_id for resume sync)
+        self.use_swanlab = not args.no_swanlab
+        self._swanlab_name = args.swanlab_name if args.swanlab_name else time_str
 
         downsample_ratio = 8
         if args.dataset.lower() == 'qnrf':
@@ -75,22 +102,6 @@ class Trainer(object):
                             for x in ['train', 'val']}
         self.model = vgg19()
         self.model.to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-
-        self.start_epoch = 0
-        if args.resume:
-            self.logger.info('loading pretrained model from ' + args.resume)
-            suf = args.resume.rsplit('.', 1)[-1]
-            if suf == 'tar':
-                checkpoint = torch.load(args.resume, self.device)
-                self.model.load_state_dict(checkpoint['model_state_dict'])
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                self.start_epoch = checkpoint['epoch'] + 1
-            elif suf == 'pth':
-                self.model.load_state_dict(torch.load(args.resume, self.device))
-        else:
-            self.logger.info('random initialization')
-
         self.ot_loss = OT_Loss(args.crop_size, downsample_ratio, args.norm_cood, self.device, args.num_of_iter_in_ot,
                                args.reg)
         self.tv_loss = nn.L1Loss(reduction='none').to(self.device)
@@ -100,18 +111,177 @@ class Trainer(object):
         self.best_mae = np.inf
         self.best_mse = np.inf
         self.best_count = 0
+        self.start_epoch = 0
+
+        # Auto-detect latest checkpoint if not explicitly given and not disabled
+        self.resume_optimizer_state = None
+        self.resume_phase = None
+        is_resume = False
+
+        if args.resume:
+            resume_path = args.resume
+            is_resume = True
+        elif not args.no_resume:
+            resume_path = self._find_latest_checkpoint()
+            if resume_path:
+                is_resume = True
+
+        if is_resume:
+            self.logger.info('resuming from ' + resume_path)
+            suf = resume_path.rsplit('.', 1)[-1]
+            if suf == 'tar':
+                checkpoint = torch.load(resume_path, self.device)
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+                self.start_epoch = checkpoint['epoch'] + 1
+                self.resume_optimizer_state = checkpoint.get('optimizer_state_dict', None)
+                self.resume_phase = checkpoint.get('phase', None)
+                if 'best_mae' in checkpoint:
+                    self.best_mae = checkpoint['best_mae']
+                    self.best_mse = checkpoint['best_mse']
+                    self.best_count = checkpoint.get('best_count', 0)
+                    self.logger.info('restored best_mae={:.2f}, best_mse={:.2f}'.format(
+                        self.best_mae, self.best_mse))
+                if self.resume_phase:
+                    self.logger.info('resumed at epoch {}, phase {}'.format(
+                        self.start_epoch, self.resume_phase))
+            elif suf == 'pth':
+                self.model.load_state_dict(torch.load(resume_path, self.device))
+                self.resume_optimizer_state = None
+                self.resume_phase = None
+        else:
+            self.logger.info('training from scratch')
+
+        # SwanLab: read or persist run ID for resume sync
+        self._swanlab_id_file = os.path.join(self.save_dir, 'swanlab_id.txt')
+        if self.use_swanlab:
+            swanlab_kwargs = dict(
+                project=args.swanlab_project,
+                experiment_name=self._swanlab_name,
+                config=vars(args),
+                logdir=self.save_dir,
+            )
+            if is_resume and os.path.exists(self._swanlab_id_file):
+                with open(self._swanlab_id_file, 'r') as f:
+                    run_id = f.read().strip()
+                swanlab_kwargs['id'] = run_id
+                swanlab_kwargs['resume'] = 'must'
+                self.logger.info('swanlab resuming run {}'.format(run_id))
+            run = swanlab.init(**swanlab_kwargs)
+            with open(self._swanlab_id_file, 'w') as f:
+                f.write(run.id)
+            self.logger.info('swanlab initialized: project={}, run={}'.format(
+                args.swanlab_project, run.id))
+
+        self._setup_phase_optimizers()
+
+    def _find_latest_checkpoint(self):
+        ckpts = sorted(
+            [f for f in os.listdir(self.save_dir) if f.endswith('_ckpt.tar')],
+            key=lambda f: int(f.split('_')[0])
+        )
+        if ckpts:
+            latest = os.path.join(self.save_dir, ckpts[-1])
+            self.logger.info('auto-detected checkpoint: {}'.format(latest))
+            return latest
+        return None
+
+    def _setup_phase_optimizers(self):
+        args = self.args
+
+        # Phase 1: freeze backbone, only train regression/density head
+        for param in self.model.features.parameters():
+            param.requires_grad = False
+
+        self.phase1_optimizer = optim.Adam(
+            list(self.model.reg_layer.parameters()) +
+            list(self.model.density_layer.parameters()),
+            lr=args.head_lr, weight_decay=args.weight_decay
+        )
+
+        # Phase 2 & 3: unfreeze all, layered learning rates
+        self.full_optimizer = optim.Adam([
+            {'params': self.model.features.parameters(),     'lr': args.backbone_lr},
+            {'params': self.model.reg_layer.parameters(),    'lr': args.head_lr},
+            {'params': self.model.density_layer.parameters(), 'lr': args.head_lr},
+        ], lr=args.head_lr, weight_decay=args.weight_decay)
+
+        # Restore optimizer state from checkpoint
+        if self.resume_optimizer_state is not None:
+            if self.resume_phase == 1:
+                self.phase1_optimizer.load_state_dict(self.resume_optimizer_state)
+                self.logger.info('restored phase1 optimizer state')
+            elif self.resume_phase in (2, 3):
+                self.full_optimizer.load_state_dict(self.resume_optimizer_state)
+                self.logger.info('restored full optimizer state (phase {})'.format(self.resume_phase))
+            else:
+                self.logger.info('no phase info in checkpoint, optimizer state not restored')
+
+        self.phase2_scheduler = CosineWarmupScheduler(
+            self.full_optimizer,
+            warmup_epochs=args.warmup_epochs,
+            total_epochs=args.phase2_epochs,
+            base_lrs=[args.backbone_lr, args.head_lr, args.head_lr],
+            min_lrs=[args.min_lr, args.min_lr, args.min_lr]
+        )
+
+        phase3_epochs = args.max_epoch - args.phase1_epochs - args.phase2_epochs
+        self.phase3_scheduler = CosineWarmupScheduler(
+            self.full_optimizer,
+            warmup_epochs=0,
+            total_epochs=phase3_epochs,
+            base_lrs=[args.backbone_lr, args.head_lr, args.head_lr],
+            min_lrs=[args.min_lr, args.min_lr, args.min_lr]
+        )
 
     def train(self):
-        """training process"""
         args = self.args
-        for epoch in range(self.start_epoch, args.max_epoch + 1):
-            self.logger.info('-' * 5 + 'Epoch {}/{}'.format(epoch, args.max_epoch) + '-' * 5)
-            self.epoch = epoch
-            self.train_eopch()
-            if epoch % args.val_epoch == 0 and epoch >= args.val_start:
-                self.val_epoch()
+        epoch = self.start_epoch
 
-    def train_eopch(self):
+        if epoch < args.phase1_epochs:
+            self._run_phase(1, epoch, args.phase1_epochs,
+                            self.phase1_optimizer, None)
+            epoch = args.phase1_epochs
+
+        if epoch < args.phase1_epochs + args.phase2_epochs:
+            self._run_phase(2, epoch,
+                            args.phase1_epochs + args.phase2_epochs,
+                            self.full_optimizer, self.phase2_scheduler)
+            epoch = args.phase1_epochs + args.phase2_epochs
+
+        if epoch < args.max_epoch + 1:
+            self.ot_ramp_step = 0
+            self._run_phase(3, epoch,
+                            args.max_epoch + 1,
+                            self.full_optimizer, self.phase3_scheduler)
+
+        if self.use_swanlab:
+            self.logger.info('swanlab run finished')
+
+    def _run_phase(self, phase, start_epoch, end_epoch, optimizer, scheduler):
+        self.current_phase = phase
+        self.optimizer = optimizer
+
+        phase_labels = {1: 'Phase 1: Freeze Backbone + MSE Only',
+                        2: 'Phase 2: Unfreeze + MSE + Count Loss',
+                        3: 'Phase 3: Full OT Loss + Cosine Annealing'}
+        self.logger.info('=== {} (Epoch {}-{}) ==='.format(
+            phase_labels[phase], start_epoch, end_epoch - 1))
+
+        if phase == 2:
+            for param in self.model.features.parameters():
+                param.requires_grad = True
+            self.logger.info('backbone unfrozen')
+
+        for epoch in range(start_epoch, end_epoch):
+            self.logger.info('-' * 5 + 'Epoch {}/{}'.format(epoch, self.args.max_epoch) + '-' * 5)
+            self.epoch = epoch
+            if scheduler is not None:
+                scheduler.step(epoch - start_epoch)
+            self.train_epoch(epoch)
+            if epoch % self.args.val_epoch == 0 and epoch >= self.args.val_start:
+                self.val_epoch(epoch)
+
+    def train_epoch(self, epoch):
         epoch_ot_loss = AverageMeter()
         epoch_ot_obj_value = AverageMeter()
         epoch_wd = AverageMeter()
@@ -121,7 +291,7 @@ class Trainer(object):
         epoch_mae = AverageMeter()
         epoch_mse = AverageMeter()
         epoch_start = time.time()
-        self.model.train()  # Set model to training mode
+        self.model.train()
 
         for step, (inputs, points, gt_discrete) in enumerate(self.dataloaders['train']):
             inputs = inputs.to(self.device)
@@ -132,28 +302,43 @@ class Trainer(object):
 
             with torch.set_grad_enabled(True):
                 outputs, outputs_normed = self.model(inputs)
-                # Compute OT loss.
-                ot_loss, wd, ot_obj_value = self.ot_loss(outputs_normed, outputs, points)
-                ot_loss = ot_loss * self.args.wot
-                ot_obj_value = ot_obj_value * self.args.wot
-                epoch_ot_loss.update(ot_loss.item(), N)
-                epoch_ot_obj_value.update(ot_obj_value.item(), N)
-                epoch_wd.update(wd, N)
 
-                # Compute counting loss.
-                count_loss = self.mae(outputs.sum(1).sum(1).sum(1),
-                                      torch.from_numpy(gd_count).float().to(self.device))
-                epoch_count_loss.update(count_loss.item(), N)
+                if self.current_phase == 1:
+                    count_loss = self.mse(outputs.sum(1).sum(1).sum(1),
+                                          torch.from_numpy(gd_count).float().to(self.device))
+                    epoch_count_loss.update(count_loss.item(), N)
+                    loss = count_loss
 
-                # Compute TV loss.
-                gd_count_tensor = torch.from_numpy(gd_count).float().to(self.device).unsqueeze(1).unsqueeze(
-                    2).unsqueeze(3)
-                gt_discrete_normed = gt_discrete / (gd_count_tensor + 1e-6)
-                tv_loss = (self.tv_loss(outputs_normed, gt_discrete_normed).sum(1).sum(1).sum(
-                    1) * torch.from_numpy(gd_count).float().to(self.device)).mean(0) * self.args.wtv
-                epoch_tv_loss.update(tv_loss.item(), N)
+                elif self.current_phase == 2:
+                    count_loss = self.mae(outputs.sum(1).sum(1).sum(1),
+                                          torch.from_numpy(gd_count).float().to(self.device))
+                    mse_loss = self.mse(outputs.sum(1).sum(1).sum(1),
+                                        torch.from_numpy(gd_count).float().to(self.device))
+                    epoch_count_loss.update(count_loss.item(), N)
+                    loss = mse_loss + count_loss
 
-                loss = ot_loss + count_loss + tv_loss
+                elif self.current_phase == 3:
+                    ramp_ratio = min(1.0, self.ot_ramp_step / max(1, self.args.ramp_ot_epochs))
+                    eff_wot = self.args.wot * ramp_ratio
+
+                    ot_loss, wd, ot_obj_value = self.ot_loss(outputs_normed, outputs, points)
+                    ot_loss = ot_loss * eff_wot
+                    ot_obj_value = ot_obj_value * eff_wot
+                    epoch_ot_loss.update(ot_loss.item(), N)
+                    epoch_ot_obj_value.update(ot_obj_value.item(), N)
+                    epoch_wd.update(wd, N)
+
+                    count_loss = self.mae(outputs.sum(1).sum(1).sum(1),
+                                          torch.from_numpy(gd_count).float().to(self.device))
+                    epoch_count_loss.update(count_loss.item(), N)
+
+                    gd_count_tensor = torch.from_numpy(gd_count).float().to(self.device).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+                    gt_discrete_normed = gt_discrete / (gd_count_tensor + 1e-6)
+                    tv_loss = (self.tv_loss(outputs_normed, gt_discrete_normed).sum(1).sum(1).sum(
+                        1) * torch.from_numpy(gd_count).float().to(self.device)).mean(0) * self.args.wtv
+                    epoch_tv_loss.update(tv_loss.item(), N)
+
+                    loss = ot_loss + count_loss + tv_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -165,26 +350,68 @@ class Trainer(object):
                 epoch_mse.update(np.mean(pred_err * pred_err), N)
                 epoch_mae.update(np.mean(abs(pred_err)), N)
 
-        self.logger.info(
-            'Epoch {} Train, Loss: {:.2f}, OT Loss: {:.2e}, Wass Distance: {:.2f}, OT obj value: {:.2f}, '
-            'Count Loss: {:.2f}, TV Loss: {:.2f}, MSE: {:.2f} MAE: {:.2f}, Cost {:.1f} sec'
-                .format(self.epoch, epoch_loss.get_avg(), epoch_ot_loss.get_avg(), epoch_wd.get_avg(),
-                        epoch_ot_obj_value.get_avg(), epoch_count_loss.get_avg(), epoch_tv_loss.get_avg(),
-                        np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
-                        time.time() - epoch_start))
+        train_metrics = {
+            'train/loss': epoch_loss.get_avg(),
+            'train/mae': epoch_mae.get_avg(),
+            'train/rmse': np.sqrt(epoch_mse.get_avg()),
+            'train/count_loss': epoch_count_loss.get_avg(),
+            'epoch': self.epoch,
+            'phase': self.current_phase,
+        }
+        lr_val = self.optimizer.param_groups[0]['lr']
+        train_metrics['train/lr'] = lr_val
+
+        if self.current_phase == 1:
+            self.logger.info(
+                'Epoch {} Train, Loss: {:.2f}, MSE: {:.2f} MAE: {:.2f}, LR: {:.2e}, Cost {:.1f} sec'
+                    .format(self.epoch, epoch_loss.get_avg(),
+                            np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
+                            lr_val, time.time() - epoch_start))
+        elif self.current_phase == 2:
+            self.logger.info(
+                'Epoch {} Train, Loss: {:.2f}, Count Loss: {:.2f}, MSE: {:.2f} MAE: {:.2f}, LR: {:.2e}, Cost {:.1f} sec'
+                    .format(self.epoch, epoch_loss.get_avg(),
+                            epoch_count_loss.get_avg(),
+                            np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
+                            lr_val, time.time() - epoch_start))
+        else:
+            train_metrics['train/ot_loss'] = epoch_ot_loss.get_avg()
+            train_metrics['train/wasserstein_dist'] = epoch_wd.get_avg()
+            train_metrics['train/ot_obj_value'] = epoch_ot_obj_value.get_avg()
+            train_metrics['train/tv_loss'] = epoch_tv_loss.get_avg()
+            self.logger.info(
+                'Epoch {} Train, Loss: {:.2f}, OT Loss: {:.2e}, Wass Distance: {:.2f}, OT obj value: {:.2f}, '
+                'Count Loss: {:.2f}, TV Loss: {:.2f}, MSE: {:.2f} MAE: {:.2f}, LR: {:.2e}, Cost {:.1f} sec'
+                    .format(self.epoch, epoch_loss.get_avg(), epoch_ot_loss.get_avg(), epoch_wd.get_avg(),
+                            epoch_ot_obj_value.get_avg(), epoch_count_loss.get_avg(), epoch_tv_loss.get_avg(),
+                            np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
+                            lr_val, time.time() - epoch_start))
+
+        if self.use_swanlab:
+            if self.current_phase == 3:
+                train_metrics['train/ot_ramp'] = min(1.0, self.ot_ramp_step / max(1, self.args.ramp_ot_epochs))
+            swanlab.log(train_metrics, step=self.epoch)
+
+        if self.current_phase == 3:
+            self.ot_ramp_step += 1
+
         model_state_dic = self.model.state_dict()
         save_path = os.path.join(self.save_dir, '{}_ckpt.tar'.format(self.epoch))
         torch.save({
             'epoch': self.epoch,
+            'phase': self.current_phase,
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'model_state_dict': model_state_dic
+            'model_state_dict': model_state_dic,
+            'best_mae': self.best_mae,
+            'best_mse': self.best_mse,
+            'best_count': self.best_count,
         }, save_path)
         self.save_list.append(save_path)
 
-    def val_epoch(self):
+    def val_epoch(self, epoch):
         args = self.args
         epoch_start = time.time()
-        self.model.eval()  # Set model to evaluate mode
+        self.model.eval()
         epoch_res = []
         for inputs, count, name in self.dataloaders['val']:
             inputs = inputs.to(self.device)
@@ -199,6 +426,15 @@ class Trainer(object):
         mae = np.mean(np.abs(epoch_res))
         self.logger.info('Epoch {} Val, MSE: {:.2f} MAE: {:.2f}, Cost {:.1f} sec'
                          .format(self.epoch, mse, mae, time.time() - epoch_start))
+
+        if self.use_swanlab:
+            swanlab.log({
+                'val/mae': mae,
+                'val/rmse': mse,
+                'val/best_mae': self.best_mae,
+                'val/best_rmse': self.best_mse,
+                'epoch': self.epoch,
+            }, step=self.epoch)
 
         model_state_dic = self.model.state_dict()
         if (2.0 * mse + mae) < (2.0 * self.best_mse + self.best_mae):

@@ -8,4 +8,12 @@ coverage/
 !.env.example
 *.pth
 *.pth.tar
+*.ckpt.tar
+ckpts/
+data/
 pretrained_models/
+__pycache__/
+*.pyc
+.uv/
+.python-version
+uv.lock

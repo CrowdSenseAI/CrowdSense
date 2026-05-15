@@ -1,7 +1,10 @@
 import argparse
 import os
 import torch
+from dotenv import load_dotenv
 from train_helper import Trainer
+
+load_dotenv()
 
 
 def str2bool(v):
@@ -17,12 +20,14 @@ def parse_args():
     parser.add_argument('--weight-decay', type=float, default=1e-4,
                         help='the weight decay')
     parser.add_argument('--resume', default='', type=str,
-                        help='the path of resume training model')
-    parser.add_argument('--max-epoch', type=int, default=1000,
+                        help='path to checkpoint file (auto-detected if empty)')
+    parser.add_argument('--no-resume', action='store_true',
+                        help='force start from scratch, ignore existing checkpoints')
+    parser.add_argument('--max-epoch', type=int, default=270,
                         help='max training epoch')
     parser.add_argument('--val-epoch', type=int, default=5,
                         help='the num of steps to log training information')
-    parser.add_argument('--val-start', type=int, default=50,
+    parser.add_argument('--val-start', type=int, default=30,
                         help='the epoch start to val')
     parser.add_argument('--batch-size', type=int, default=10,
                         help='train batch size')
@@ -31,13 +36,33 @@ def parse_args():
                         help='the num of training process')
     parser.add_argument('--crop-size', type=int, default=512,
                         help='the crop size of the train image')
-    parser.add_argument('--wot', type=float, default=0.1, help='weight on OT loss')
+    parser.add_argument('--wot', type=float, default=0.05, help='weight on OT loss')
     parser.add_argument('--wtv', type=float, default=0.01, help='weight on TV loss')
     parser.add_argument('--reg', type=float, default=10.0,
                         help='entropy regularization in sinkhorn')
-    parser.add_argument('--num-of-iter-in-ot', type=int, default=100,
+    parser.add_argument('--num-of-iter-in-ot', type=int, default=50,
                         help='sinkhorn iterations')
     parser.add_argument('--norm-cood', type=int, default=0, help='whether to norm cood when computing distance')
+    parser.add_argument('--phase1-epochs', type=int, default=10,
+                        help='Phase 1: freeze backbone + MSE only')
+    parser.add_argument('--phase2-epochs', type=int, default=60,
+                        help='Phase 2: unfreeze + MSE + Count Loss')
+    parser.add_argument('--ramp-ot-epochs', type=int, default=10,
+                        help='Phase 3 OT loss linear ramp-up epochs')
+    parser.add_argument('--backbone-lr', type=float, default=5e-6,
+                        help='learning rate for backbone (pre-trained layers)')
+    parser.add_argument('--head-lr', type=float, default=5e-5,
+                        help='learning rate for regression/density head')
+    parser.add_argument('--warmup-epochs', type=int, default=5,
+                        help='linear LR warmup epochs')
+    parser.add_argument('--min-lr', type=float, default=1e-6,
+                        help='minimum LR for cosine annealing')
+    parser.add_argument('--swanlab-project', type=str, default='crowdsense',
+                        help='swanlab project name')
+    parser.add_argument('--swanlab-name', type=str, default=None,
+                        help='swanlab run name (default: auto-generated)')
+    parser.add_argument('--no-swanlab', action='store_true',
+                        help='disable swanlab logging')
 
     args = parser.parse_args()
 

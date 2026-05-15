@@ -8,6 +8,7 @@ from torchvision import transforms
 import random
 import numpy as np
 import scipy.io as sio
+import cv2
 
 
 def random_crop(im_h, im_w, crop_h, crop_w):
@@ -58,6 +59,9 @@ class Base(data.Dataset):
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
+        self.color_jitter = transforms.ColorJitter(
+            brightness=0.1, contrast=0.1, saturation=0.1, hue=0.0
+        )
 
     def __len__(self):
         pass
@@ -67,22 +71,54 @@ class Base(data.Dataset):
 
     def train_transform(self, img, keypoints):
         wd, ht = img.size
+        assert len(keypoints) >= 0
+
+        # Scale augmentation: scale entire image first to simulate camera distance change
+        scale_factor = random.uniform(0.7, 1.5)
+        if abs(scale_factor - 1.0) > 0.01:
+            new_w = int(round(wd * scale_factor))
+            new_h = int(round(ht * scale_factor))
+            img_np = np.array(img)
+            img_np = cv2.resize(img_np, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            if len(keypoints) > 0:
+                keypoints = keypoints * scale_factor
+
+            # Pad if scaled image is smaller than crop_size in any dimension
+            if new_h < self.c_size or new_w < self.c_size:
+                pad_bot = max(0, self.c_size - new_h)
+                pad_right = max(0, self.c_size - new_w)
+                img_np = cv2.copyMakeBorder(
+                    img_np, 0, pad_bot, 0, pad_right,
+                    cv2.BORDER_REFLECT_101
+                )
+                if len(keypoints) > 0:
+                    keypoints = keypoints + [0, 0]  # pad at top-left, no offset needed
+                new_h = max(new_h, self.c_size)
+                new_w = max(new_w, self.c_size)
+
+            img = Image.fromarray(img_np)
+            wd, ht = new_w, new_h
+
+        # Random crop
         st_size = 1.0 * min(wd, ht)
         assert st_size >= self.c_size
-        assert len(keypoints) >= 0
         i, j, h, w = random_crop(ht, wd, self.c_size, self.c_size)
         img = F.crop(img, i, j, h, w)
         if len(keypoints) > 0:
             keypoints = keypoints - [j, i]
-            idx_mask = (keypoints[:, 0] >= 0) * (keypoints[:, 0] <= w) * \
-                       (keypoints[:, 1] >= 0) * (keypoints[:, 1] <= h)
+            idx_mask = (keypoints[:, 0] >= 0) & (keypoints[:, 0] <= w) * \
+                       (keypoints[:, 1] >= 0) & (keypoints[:, 1] <= h)
             keypoints = keypoints[idx_mask]
         else:
             keypoints = np.empty([0, 2])
 
-        gt_discrete = gen_discrete_map(h, w, keypoints)
-        down_w = w // self.d_ratio
-        down_h = h // self.d_ratio
+        # Color jitter for lighting robustness
+        if random.random() > 0.5:
+            img = self.color_jitter(img)
+
+        gt_discrete = gen_discrete_map(self.c_size, self.c_size, keypoints)
+        down_w = self.c_size // self.d_ratio
+        down_h = self.c_size // self.d_ratio
         gt_discrete = gt_discrete.reshape([down_h, self.d_ratio, down_w, self.d_ratio]).sum(axis=(1, 3))
         assert np.sum(gt_discrete) == len(keypoints)
 
@@ -90,7 +126,7 @@ class Base(data.Dataset):
             if random.random() > 0.5:
                 img = F.hflip(img)
                 gt_discrete = np.fliplr(gt_discrete)
-                keypoints[:, 0] = w - keypoints[:, 0]
+                keypoints[:, 0] = self.c_size - keypoints[:, 0]
         else:
             if random.random() > 0.5:
                 img = F.hflip(img)
@@ -203,6 +239,33 @@ class Crowd_sh(Base):
             keypoints = keypoints * rr
         assert st_size >= self.c_size, print(wd, ht)
         assert len(keypoints) >= 0
+
+        # Scale augmentation: scale entire image first to simulate camera distance change
+        scale_factor = random.uniform(0.7, 1.5)
+        if abs(scale_factor - 1.0) > 0.01:
+            new_w = int(round(wd * scale_factor))
+            new_h = int(round(ht * scale_factor))
+            img_np = np.array(img)
+            img_np = cv2.resize(img_np, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            if len(keypoints) > 0:
+                keypoints = keypoints * scale_factor
+
+            if new_h < self.c_size or new_w < self.c_size:
+                pad_bot = max(0, self.c_size - new_h)
+                pad_right = max(0, self.c_size - new_w)
+                img_np = cv2.copyMakeBorder(
+                    img_np, 0, pad_bot, 0, pad_right,
+                    cv2.BORDER_REFLECT_101
+                )
+                if len(keypoints) > 0:
+                    keypoints = keypoints + [0, 0]
+                new_h = max(new_h, self.c_size)
+                new_w = max(new_w, self.c_size)
+
+            img = Image.fromarray(img_np)
+            wd, ht = new_w, new_h
+
+        # Random crop
         i, j, h, w = random_crop(ht, wd, self.c_size, self.c_size)
         img = F.crop(img, i, j, h, w)
         if len(keypoints) > 0:
@@ -213,9 +276,13 @@ class Crowd_sh(Base):
         else:
             keypoints = np.empty([0, 2])
 
-        gt_discrete = gen_discrete_map(h, w, keypoints)
-        down_w = w // self.d_ratio
-        down_h = h // self.d_ratio
+        # Color jitter for lighting robustness
+        if random.random() > 0.5:
+            img = self.color_jitter(img)
+
+        gt_discrete = gen_discrete_map(self.c_size, self.c_size, keypoints)
+        down_w = self.c_size // self.d_ratio
+        down_h = self.c_size // self.d_ratio
         gt_discrete = gt_discrete.reshape([down_h, self.d_ratio, down_w, self.d_ratio]).sum(axis=(1, 3))
         assert np.sum(gt_discrete) == len(keypoints)
 
@@ -223,7 +290,7 @@ class Crowd_sh(Base):
             if random.random() > 0.5:
                 img = F.hflip(img)
                 gt_discrete = np.fliplr(gt_discrete)
-                keypoints[:, 0] = w - keypoints[:, 0] - 1
+                keypoints[:, 0] = self.c_size - keypoints[:, 0] - 1
         else:
             if random.random() > 0.5:
                 img = F.hflip(img)
