@@ -83,6 +83,7 @@ CREATE TABLE inference_task (
     image_name VARCHAR(255),
     image_path VARCHAR(255),
     crowd_count INT,
+    density_level VARCHAR(100),
     density_path VARCHAR(255),
     inference_time BIGINT,
     status VARCHAR(255),
