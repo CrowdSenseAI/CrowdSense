@@ -1,0 +1,35 @@
+{
+  "project_name": "crowdsense-server",
+  "description": "CrowdSense 人群计数管理系统",
+  "entities": [
+    {
+      "name": "InferenceTask",
+      "fields": [
+        {"name": "imageName", "type": "String", "comment": "图片文件名"},
+        {"name": "imagePath", "type": "String", "comment": "图片存储路径"},
+        {"name": "crowdCount", "type": "Integer", "comment": "预测人数"},
+        {"name": "densityPath", "type": "String", "comment": "密度图路径"},
+        {"name": "inferenceTime", "type": "Long", "comment": "推理耗时(ms)"},
+        {"name": "status", "type": "String", "comment": "状态(PENDING/SUCCESS/FAILED)"}
+      ]
+    }
+  ],
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "name": "crowdsense",
+    "user": "root",
+    "password": "your_password_here"
+  },
+  "redis": {
+    "enable": false,
+    "host": "localhost",
+    "port": 6379,
+    "password": ""
+  },
+  "server": {
+    "backend_port": 8080,
+    "frontend_port": 5173
+  },
+  "enable_swagger": true
+}

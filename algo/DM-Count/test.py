@@ -3,7 +3,7 @@ import torch
 import os
 import numpy as np
 import datasets.crowd as crowd
-from models import vgg19
+from models import resnet_fpn
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
         if not os.path.exists(args.pred_density_map_path):
             os.makedirs(args.pred_density_map_path)
 
-    model = vgg19()
+    model = resnet_fpn()
     model.to(device)
     model.load_state_dict(torch.load(model_path, device))
     model.eval()

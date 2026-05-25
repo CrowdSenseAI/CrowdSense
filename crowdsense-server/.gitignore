@@ -1,0 +1,22 @@
+# Build
+backend/target/
+backend/logs/
+frontend/dist/
+
+# Dependencies
+frontend/node_modules/
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+!.env.example
+
+# Uploads (runtime)
+backend/uploads/

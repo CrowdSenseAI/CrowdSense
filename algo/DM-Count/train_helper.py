@@ -11,7 +11,7 @@ from datetime import datetime
 import swanlab
 
 from datasets.crowd import Crowd_qnrf, Crowd_nwpu, Crowd_sh
-from models import vgg19
+from models import resnet_fpn
 from losses.ot_loss import OT_Loss
 from utils.pytorch_utils import Save_Handle, AverageMeter
 import utils.log_utils as log_utils
@@ -100,7 +100,7 @@ class Trainer(object):
                                           num_workers=args.num_workers * self.device_count,
                                           pin_memory=(True if x == 'train' else False))
                             for x in ['train', 'val']}
-        self.model = vgg19()
+        self.model = resnet_fpn()
         self.model.to(self.device)
         self.ot_loss = OT_Loss(args.crop_size, downsample_ratio, args.norm_cood, self.device, args.num_of_iter_in_ot,
                                args.reg)
@@ -188,71 +188,50 @@ class Trainer(object):
     def _setup_phase_optimizers(self):
         args = self.args
 
-        # Phase 1: freeze backbone, only train regression/density head
-        for param in self.model.features.parameters():
-            param.requires_grad = False
-
-        self.phase1_optimizer = optim.Adam(
-            list(self.model.reg_layer.parameters()) +
-            list(self.model.density_layer.parameters()),
-            lr=args.head_lr, weight_decay=args.weight_decay
-        )
-
-        # Phase 2 & 3: unfreeze all, layered learning rates
+        # No Phase 1 — start unfrozen, layered learning rates from epoch 0
+        import itertools
+        self._backbone_modules = [
+            self.model.conv1, self.model.bn1,
+            self.model.layer1, self.model.layer2,
+            self.model.layer3, self.model.layer4
+        ]
+        backbone_params = itertools.chain(*[m.parameters() for m in self._backbone_modules])
         self.full_optimizer = optim.Adam([
-            {'params': self.model.features.parameters(),     'lr': args.backbone_lr},
-            {'params': self.model.reg_layer.parameters(),    'lr': args.head_lr},
+            {'params': backbone_params,                       'lr': args.backbone_lr},
+            {'params': self.model.fusion.parameters(),        'lr': args.head_lr},
+            {'params': self.model.reg_layer.parameters(),     'lr': args.head_lr},
             {'params': self.model.density_layer.parameters(), 'lr': args.head_lr},
         ], lr=args.head_lr, weight_decay=args.weight_decay)
 
         # Restore optimizer state from checkpoint
         if self.resume_optimizer_state is not None:
-            if self.resume_phase == 1:
-                self.phase1_optimizer.load_state_dict(self.resume_optimizer_state)
-                self.logger.info('restored phase1 optimizer state')
-            elif self.resume_phase in (2, 3):
-                self.full_optimizer.load_state_dict(self.resume_optimizer_state)
-                self.logger.info('restored full optimizer state (phase {})'.format(self.resume_phase))
-            else:
-                self.logger.info('no phase info in checkpoint, optimizer state not restored')
+            self.full_optimizer.load_state_dict(self.resume_optimizer_state)
+            self.logger.info('restored optimizer state (phase {})'.format(self.resume_phase))
 
-        self.phase2_scheduler = CosineWarmupScheduler(
+        # Single cosine scheduler for full training (Phase 2 + Phase 3 combined)
+        total = args.max_epoch
+        self.scheduler = CosineWarmupScheduler(
             self.full_optimizer,
             warmup_epochs=args.warmup_epochs,
-            total_epochs=args.phase2_epochs,
-            base_lrs=[args.backbone_lr, args.head_lr, args.head_lr],
-            min_lrs=[args.min_lr, args.min_lr, args.min_lr]
-        )
-
-        phase3_epochs = args.max_epoch - args.phase1_epochs - args.phase2_epochs
-        self.phase3_scheduler = CosineWarmupScheduler(
-            self.full_optimizer,
-            warmup_epochs=0,
-            total_epochs=phase3_epochs,
-            base_lrs=[args.backbone_lr, args.head_lr, args.head_lr],
-            min_lrs=[args.min_lr, args.min_lr, args.min_lr]
+            total_epochs=total,
+            base_lrs=[args.backbone_lr, args.head_lr, args.head_lr, args.head_lr],
+            min_lrs=[args.min_lr, args.min_lr, args.min_lr, args.min_lr]
         )
 
     def train(self):
         args = self.args
         epoch = self.start_epoch
+        phase2_end = args.phase2_epochs
 
-        if epoch < args.phase1_epochs:
-            self._run_phase(1, epoch, args.phase1_epochs,
-                            self.phase1_optimizer, None)
-            epoch = args.phase1_epochs
+        if epoch < phase2_end:
+            self._run_phase(2, epoch, phase2_end,
+                            self.full_optimizer, self.scheduler)
 
-        if epoch < args.phase1_epochs + args.phase2_epochs:
-            self._run_phase(2, epoch,
-                            args.phase1_epochs + args.phase2_epochs,
-                            self.full_optimizer, self.phase2_scheduler)
-            epoch = args.phase1_epochs + args.phase2_epochs
-
-        if epoch < args.max_epoch + 1:
+        if self.start_epoch < args.max_epoch + 1:
             self.ot_ramp_step = 0
-            self._run_phase(3, epoch,
+            self._run_phase(3, max(epoch, phase2_end),
                             args.max_epoch + 1,
-                            self.full_optimizer, self.phase3_scheduler)
+                            self.full_optimizer, self.scheduler)
 
         if self.use_swanlab:
             self.logger.info('swanlab run finished')
@@ -261,16 +240,13 @@ class Trainer(object):
         self.current_phase = phase
         self.optimizer = optimizer
 
-        phase_labels = {1: 'Phase 1: Freeze Backbone + MSE Only',
-                        2: 'Phase 2: Unfreeze + MSE + Count Loss',
+        phase_labels = {2: 'Phase 2: MSE + Count Loss (warmup)',
                         3: 'Phase 3: Full OT Loss + Cosine Annealing'}
         self.logger.info('=== {} (Epoch {}-{}) ==='.format(
             phase_labels[phase], start_epoch, end_epoch - 1))
 
         if phase == 2:
-            for param in self.model.features.parameters():
-                param.requires_grad = True
-            self.logger.info('backbone unfrozen')
+            self.logger.info('backbone training from epoch 0 (no freeze)')
 
         for epoch in range(start_epoch, end_epoch):
             self.logger.info('-' * 5 + 'Epoch {}/{}'.format(epoch, self.args.max_epoch) + '-' * 5)

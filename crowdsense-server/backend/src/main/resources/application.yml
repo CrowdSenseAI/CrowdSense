@@ -1,0 +1,63 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: crowdsense-server
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/crowdsense?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: ${MYSQL_PASSWORD:your_password_here}
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+      pool-name: HikariCP
+      connection-test-query: SELECT 1
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+    banner: false
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+jwt:
+  secret: c2VjdXJlLXNlY3JldC1rZXktZm9yLWNyb3dkc2Vuc2Utand0LXRva2VuLWdlbmVyYXRpb24tMjAyNA==
+  expiration: 86400000
+
+app:
+  upload:
+    dir: uploads/images
+    density-dir: uploads/density
+  model:
+    path: classpath:models/resnet_fpn.onnx
+
+logging:
+  level:
+    root: info
+    com.example.crowdsenseserver: debug
+  file:
+    name: logs/application.log
+    max-size: 10MB
+    max-history: 30

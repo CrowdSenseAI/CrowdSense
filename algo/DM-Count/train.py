@@ -23,13 +23,13 @@ def parse_args():
                         help='path to checkpoint file (auto-detected if empty)')
     parser.add_argument('--no-resume', action='store_true',
                         help='force start from scratch, ignore existing checkpoints')
-    parser.add_argument('--max-epoch', type=int, default=270,
+    parser.add_argument('--max-epoch', type=int, default=300,
                         help='max training epoch')
     parser.add_argument('--val-epoch', type=int, default=5,
                         help='the num of steps to log training information')
     parser.add_argument('--val-start', type=int, default=30,
                         help='the epoch start to val')
-    parser.add_argument('--batch-size', type=int, default=10,
+    parser.add_argument('--batch-size', type=int, default=24,
                         help='train batch size')
     parser.add_argument('--device', default='0', help='assign device')
     parser.add_argument('--num-workers', type=int, default=3,
@@ -43,13 +43,13 @@ def parse_args():
     parser.add_argument('--num-of-iter-in-ot', type=int, default=50,
                         help='sinkhorn iterations')
     parser.add_argument('--norm-cood', type=int, default=0, help='whether to norm cood when computing distance')
-    parser.add_argument('--phase1-epochs', type=int, default=10,
+    parser.add_argument('--phase1-epochs', type=int, default=0,
                         help='Phase 1: freeze backbone + MSE only')
     parser.add_argument('--phase2-epochs', type=int, default=60,
                         help='Phase 2: unfreeze + MSE + Count Loss')
     parser.add_argument('--ramp-ot-epochs', type=int, default=10,
                         help='Phase 3 OT loss linear ramp-up epochs')
-    parser.add_argument('--backbone-lr', type=float, default=5e-6,
+    parser.add_argument('--backbone-lr', type=float, default=1e-5,
                         help='learning rate for backbone (pre-trained layers)')
     parser.add_argument('--head-lr', type=float, default=5e-5,
                         help='learning rate for regression/density head')
@@ -82,7 +82,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device.strip()  # set vis gpu
     trainer = Trainer(args)
     trainer.setup()

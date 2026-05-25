@@ -5,13 +5,13 @@ import os
 import glob
 from PIL import Image, ImageDraw, ImageFont
 from torchvision import transforms
-from models import vgg19
+from models import resnet_fpn
 
 model_path = r"ckpts/input-512_wot-0.1_wtv-0.01_reg-10.0_nIter-100_normCood-0/best_model_9.pth"
 image_dir = r"example_images"
 device = torch.device('cuda')
 
-model = vgg19()
+model = resnet_fpn()
 model.to(device)
 model.load_state_dict(torch.load(model_path, map_location=device))
 model.eval()
