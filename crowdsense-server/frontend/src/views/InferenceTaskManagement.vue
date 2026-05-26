@@ -1,10 +1,56 @@
 <template>
   <div class="management">
-    <!-- 上传推理区域 -->
-    <el-card class="upload-card">
-      <template #header>
-        <span>人群计数推理</span>
-      </template>
+    <!-- 统计卡片行 -->
+    <el-card shadow="hover" class="stats-card">
+      <el-row :gutter="16">
+        <el-col :span="6">
+          <div class="mini-stat mini-stat--blue">
+            <div class="mini-stat__icon"><el-icon :size="24"><Document /></el-icon></div>
+            <div class="mini-stat__info">
+              <div class="mini-stat__value">{{ stats.total }}</div>
+              <div class="mini-stat__label">任务总数</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="mini-stat mini-stat--green">
+            <div class="mini-stat__icon"><el-icon :size="24"><CircleCheck /></el-icon></div>
+            <div class="mini-stat__info">
+              <div class="mini-stat__value">{{ stats.successRate }}%</div>
+              <div class="mini-stat__label">成功率</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="mini-stat mini-stat--orange">
+            <div class="mini-stat__icon"><el-icon :size="24"><Timer /></el-icon></div>
+            <div class="mini-stat__info">
+              <div class="mini-stat__value">{{ stats.avgTime }}ms</div>
+              <div class="mini-stat__label">平均耗时</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="mini-stat mini-stat--purple">
+            <div class="mini-stat__icon"><el-icon :size="24"><Calendar /></el-icon></div>
+            <div class="mini-stat__info">
+              <div class="mini-stat__value">{{ stats.today }}</div>
+              <div class="mini-stat__label">今日任务</div>
+            </div>
+          </div>
+        </el-col>
+      </el-row>
+    </el-card>
+
+    <!-- 密度等级分布 -->
+    <el-card shadow="hover" style="margin-top:16px">
+      <template #header><span class="card-title">密度等级分布</span></template>
+      <v-chart :option="densityPieOption" style="height:240px" autoresize />
+    </el-card>
+
+    <!-- 上传推理 -->
+    <el-card class="upload-card" shadow="hover" style="margin-top:16px">
+      <template #header><span class="card-title">人群计数推理</span></template>
       <el-upload
         class="upload-area"
         drag
@@ -13,209 +59,117 @@
         :on-change="handleFileChange"
         accept="image/jpeg,image/png,image/jpg"
       >
-        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-        <div class="el-upload__text">拖拽图片到此处或 <em>点击上传</em></div>
-        <template #tip>
+        <div class="upload-inner" v-loading="loadingInfer" element-loading-text="推理中...">
+          <svg class="upload-art" viewBox="0 0 80 50" width="140" height="88">
+            <rect x="0" y="10" width="50" height="40" rx="3" fill="#409EFF" opacity="0.15"/>
+            <rect x="4" y="14" width="42" height="32" rx="2" fill="#409EFF" opacity="0.08"/>
+            <circle cx="12" cy="22" r="2" fill="#409EFF" opacity="0.4"/>
+            <circle cx="20" cy="22" r="2" fill="#67c23a" opacity="0.4"/>
+            <circle cx="28" cy="22" r="2" fill="#e6a23c" opacity="0.4"/>
+            <circle cx="16" cy="30" r="2" fill="#f56c6c" opacity="0.4"/>
+            <circle cx="24" cy="30" r="2" fill="#9b59b6" opacity="0.4"/>
+            <circle cx="12" cy="38" r="2" fill="#e6a23c" opacity="0.4"/>
+            <circle cx="20" cy="38" r="2" fill="#409EFF" opacity="0.4"/>
+            <rect x="56" y="0" width="24" height="50" rx="3" fill="#67c23a" opacity="0.15"/>
+            <rect x="60" y="4" width="16" height="42" rx="2" fill="#67c23a" opacity="0.1"/>
+            <circle cx="68" cy="12" r="2.5" fill="#67c23a" opacity="0.35"/>
+            <circle cx="68" cy="22" r="3" fill="#e6a23c" opacity="0.35"/>
+            <circle cx="68" cy="32" r="4" fill="#f56c6c" opacity="0.35"/>
+          </svg>
+          <div class="el-upload__text">拖拽图片到此处或 <em>点击上传</em></div>
           <div class="el-upload__tip">支持 JPG/PNG 格式</div>
-        </template>
-      </el-upload>
-
-      <!-- 推理结果 -->
-      <el-dialog v-model="resultVisible" title="推理结果" width="700px">
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <h4>原图</h4>
-            <el-image v-if="inferResult.imageUrl" :src="inferResult.imageUrl" fit="contain" style="width:100%;max-height:300px" />
-          </el-col>
-          <el-col :span="12">
-            <h4>密度图</h4>
-            <el-image v-if="inferResult.densityUrl" :src="inferResult.densityUrl" fit="contain" style="width:100%;max-height:300px" />
-          </el-col>
-        </el-row>
-        <el-descriptions :column="2" border style="margin-top:20px">
-          <el-descriptions-item label="密度等级">
-            <el-tag :type="inferResult.levelTag" effect="dark" size="large">
-              {{ inferResult.densityLevel }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="推理耗时">{{ inferResult.inferenceTime }} ms</el-descriptions-item>
-        </el-descriptions>
-      </el-dialog>
-    </el-card>
-
-    <!-- 任务列表 -->
-    <el-card style="margin-top:20px">
-      <template #header>
-        <div class="card-header">
-          <span>{{ pageTitle }}</span>
         </div>
-      </template>
-
-      <!-- 条件查询区域 -->
-      <el-form :inline="true" :model="searchForm" class="search-form">
-        <el-form-item label="状态">
-          <el-select v-model="searchForm.status" placeholder="请选择状态" clearable style="width: 160px">
-            <el-option value="SUCCESS" label="成功" />
-            <el-option value="FAILED" label="失败" />
-            <el-option value="PENDING" label="处理中" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch" :icon="Search">查询</el-button>
-          <el-button @click="handleReset" :icon="RefreshRight">重置</el-button>
-        </el-form-item>
-      </el-form>
-
-      <!-- 数据表格 -->
-      <el-table :data="list" style="width: 100%" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="80" align="center" />
-        <el-table-column label="图片" width="100" align="center">
-          <template #default="scope">
-            <el-image v-if="scope.row.imagePath" :src="'/api/files/images/' + scope.row.imagePath" style="width:60px;height:60px" fit="cover" :preview-src-list="['/api/files/images/' + scope.row.imagePath]" />
-          </template>
-        </el-table-column>
-        <el-table-column label="密度图" width="100" align="center">
-          <template #default="scope">
-            <el-image v-if="scope.row.densityPath" :src="'/api/files/density/' + scope.row.densityPath" style="width:60px;height:60px" fit="cover" :preview-src-list="['/api/files/density/' + scope.row.densityPath]" />
-          </template>
-        </el-table-column>
-        <el-table-column label="密度等级" width="160" align="center">
-          <template #default="scope">
-            <el-tag v-if="scope.row.densityLevel" :type="levelTagType(scope.row.densityLevel)" effect="dark" size="small">
-              {{ scope.row.densityLevel }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="inferenceTime" label="耗时(ms)" width="100" align="center" />
-        <el-table-column prop="status" label="状态" width="100" align="center">
-          <template #default="scope">
-            <el-tag :type="statusType(scope.row.status)">{{ scope.row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createTime" label="创建时间" show-overflow-tooltip />
-        <el-table-column label="操作" width="150" fixed="right" align="center">
-          <template #default="scope">
-            <el-button size="small" @click="handleView(scope.row)" :icon="View">查看</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(scope.row)" :icon="Delete">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <el-pagination
-        v-model:current-page="pagination.current"
-        v-model:page-size="pagination.size"
-        :total="pagination.total"
-        :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-        class="pagination"
-      />
+      </el-upload>
     </el-card>
 
-    <!-- 查看详情对话框 -->
-    <el-dialog v-model="viewDialogVisible" title="查看详情" width="600px" destroy-on-close>
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="ID">{{ formData.id }}</el-descriptions-item>
-        <el-descriptions-item label="图片"
-          ><el-image v-if="formData.imagePath" :src="'/api/files/images/' + formData.imagePath" style="max-width:200px" fit="contain"
-        /></el-descriptions-item>
-        <el-descriptions-item label="密度图"
-          ><el-image v-if="formData.densityPath" :src="'/api/files/density/' + formData.densityPath" style="max-width:200px" fit="contain"
-        /></el-descriptions-item>
+    <!-- 推理结果 -->
+    <el-dialog v-model="resultVisible" title="推理结果" width="700px">
+      <el-row :gutter="20">
+        <el-col :span="12">
+          <h4>原图</h4>
+          <el-image v-if="inferResult.imageUrl" :src="inferResult.imageUrl" fit="contain" style="width:100%;max-height:300px" />
+        </el-col>
+        <el-col :span="12">
+          <h4>密度图</h4>
+          <el-image v-if="inferResult.densityUrl" :src="inferResult.densityUrl" fit="contain" style="width:100%;max-height:300px" />
+        </el-col>
+      </el-row>
+      <el-descriptions :column="2" border style="margin-top:20px">
         <el-descriptions-item label="密度等级">
-          <el-tag v-if="formData.densityLevel" :type="levelTagType(formData.densityLevel)" effect="dark" size="small">
-            {{ formData.densityLevel }}
+          <el-tag :type="inferResult.levelTag" effect="dark" size="large">
+            {{ inferResult.densityLevel }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="推理耗时(ms)">{{ formData.inferenceTime }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ formData.status }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formData.createTime }}</el-descriptions-item>
+        <el-descriptions-item label="推理耗时">{{ inferResult.inferenceTime }} ms</el-descriptions-item>
       </el-descriptions>
-      <template #footer>
-        <el-button @click="viewDialogVisible = false">关闭</el-button>
-      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, RefreshRight, View, Edit, Delete, UploadFilled } from '@element-plus/icons-vue'
-import {
-  getInferenceTaskList,
-  getInferenceTaskById,
-  deleteInferenceTask,
-  uploadInferenceImage
-} from '../api/inferenceTask'
+import { ElMessage } from 'element-plus'
+import { Document, CircleCheck, Timer, Calendar } from '@element-plus/icons-vue'
+import { getInferenceTaskList, uploadInferenceImage } from '../api/inferenceTask'
 
-// ==================== 响应式数据 ====================
-const loading = ref(false)
-const list = ref([])
-const viewDialogVisible = ref(false)
 const resultVisible = ref(false)
 const loadingInfer = ref(false)
-const formRef = ref()
-const pageTitle = '推理任务管理'
+
+const stats = reactive({ total: 0, successRate: 0, avgTime: 0, today: 0 })
 
 const inferResult = reactive({
   crowdCount: 0, inferenceTime: 0, imageUrl: '', densityUrl: '',
-  densityLevel: '', levelTag: 'info', levelColor: '#409EFF'
+  densityLevel: '', levelTag: 'info'
 })
 
-// 分页配置
-const pagination = reactive({
-  current: 1, size: 10, total: 0
+const densityPieOption = reactive({
+  tooltip: { trigger: 'item', formatter: '{b}: {c} 次 ({d}%)' },
+  legend: { bottom: 0, textStyle: { fontSize: 12 } },
+  series: [{
+    type: 'pie',
+    radius: ['50%', '75%'],
+    center: ['50%', '45%'],
+    itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+    label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 },
+    emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+    data: []
+  }]
 })
 
-// 查询表单
-const searchForm = reactive({
-  status: ''
-})
-
-// 表单数据
-const formData = ref({})
-
-// ==================== 方法 ====================
-const levelTagType = (level) => {
-  if (!level) return 'info'
-  if (level.includes('Low') || level.includes('低密度')) return 'success'
-  if (level.includes('Normal') || level.includes('正常密度')) return 'warning'
-  if (level.includes('Dense') || level.includes('密集')) return 'danger'
-  if (level.includes('Crowded') || level.includes('拥挤')) return 'danger'
-  return 'info'
-}
-const statusType = (status) => {
-  if (status === 'SUCCESS') return 'success'
-  if (status === 'FAILED') return 'danger'
-  return 'warning'
+const densityChartColor = (level) => {
+  if (!level) return '#909399'
+  if (level.includes('Low') || level.includes('低')) return '#67c23a'
+  if (level.includes('Normal') || level.includes('正常')) return '#e6a23c'
+  if (level.includes('Dense') || level.includes('密集')) return '#f56c6c'
+  if (level.includes('Crowded') || level.includes('拥挤') || level.includes('极度')) return '#e74c3c'
+  return '#909399'
 }
 
-// 加载数据
-const loadData = async () => {
-  loading.value = true
+const loadStats = async () => {
   try {
-    const params = { current: pagination.current, size: pagination.size, ...searchForm }
-    // 清除空值
-    Object.keys(params).forEach(k => { if (params[k] === '' || params[k] === null) delete params[k] })
-    const res = await getInferenceTaskList(params)
-    list.value = res.records || res.data?.records || []
-    pagination.total = res.total || res.data?.total || 0
-  } catch (error) {
-    ElMessage.error('加载数据失败')
-  } finally {
-    loading.value = false
-  }
+    const res = await getInferenceTaskList({ current: 1, size: 1000 })
+    const records = res.records || res.data?.records || []
+    stats.total = res.total || res.data?.total || records.length
+
+    const success = records.filter(r => r.status === 'SUCCESS')
+    stats.successRate = stats.total > 0 ? Math.round((success.length / records.length) * 100) : 0
+    const times = records.filter(r => r.inferenceTime != null).map(r => r.inferenceTime)
+    stats.avgTime = times.length > 0 ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : 0
+
+    const todayStr = new Date().toISOString().slice(0, 10)
+    stats.today = records.filter(r => r.createTime && r.createTime.startsWith(todayStr)).length
+
+    const densityMap = {}
+    records.forEach(r => {
+      const level = r.densityLevel || '未知'
+      densityMap[level] = (densityMap[level] || 0) + 1
+    })
+    densityPieOption.series[0].data = Object.entries(densityMap).map(([name, value]) => ({
+      name, value, itemStyle: { color: densityChartColor(name) }
+    }))
+  } catch { /* silent */ }
 }
 
-const handleSearch = () => { pagination.current = 1; loadData() }
-const handleReset = () => { searchForm.status = ''; pagination.current = 1; loadData() }
-const handleSizeChange = (size) => { pagination.size = size; loadData() }
-const handleCurrentChange = (current) => { pagination.current = current; loadData() }
-
-// 上传图片进行推理
 const handleFileChange = async (file) => {
   loadingInfer.value = true
   try {
@@ -224,7 +178,7 @@ const handleFileChange = async (file) => {
       Object.assign(inferResult, res.data)
       resultVisible.value = true
       ElMessage.success('推理完成')
-      loadData()
+      loadStats()
     } else {
       ElMessage.error(res.message || '推理失败')
     }
@@ -235,39 +189,46 @@ const handleFileChange = async (file) => {
   }
 }
 
-// 查看详情
-const handleView = async (row) => {
-  try {
-    const res = await getInferenceTaskById(row.id)
-    formData.value = res
-    viewDialogVisible.value = true
-  } catch (error) {
-    ElMessage.error('获取详情失败')
-  }
-}
-
-// 删除
-const handleDelete = async (row) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该数据吗？', '确认删除', {
-      type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消'
-    })
-    await deleteInferenceTask(row.id)
-    ElMessage.success('删除成功')
-    loadData()
-  } catch (error) {
-    if (error !== 'cancel') ElMessage.error('删除失败')
-  }
-}
-
-onMounted(() => { loadData() })
+onMounted(() => { loadStats() })
 </script>
 
 <style scoped>
 .management { padding: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; }
-.search-form { margin-bottom: 20px; padding: 20px; background-color: #f5f7fa; border-radius: 4px; }
-.pagination { margin-top: 20px; justify-content: flex-end; }
-.upload-card { margin-bottom: 0; }
-.upload-area { width: 100%; }
+
+.stats-card { margin-bottom: 0; }
+.stats-card :deep(.el-card__body) { padding: 16px 20px; }
+.mini-stat {
+  display: flex; align-items: center; gap: 14px;
+  background: #fff; padding: 18px 16px; border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: default;
+}
+.mini-stat:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+.mini-stat__icon {
+  width: 48px; height: 48px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; flex-shrink: 0;
+}
+.mini-stat--blue .mini-stat__icon { background: linear-gradient(135deg, #409EFF, #66b1ff); }
+.mini-stat--green .mini-stat__icon { background: linear-gradient(135deg, #67c23a, #85ce61); }
+.mini-stat--orange .mini-stat__icon { background: linear-gradient(135deg, #e6a23c, #ebb563); }
+.mini-stat--purple .mini-stat__icon { background: linear-gradient(135deg, #9b59b6, #b07cc6); }
+.mini-stat__value { font-size: 22px; font-weight: 700; color: #303133; line-height: 1; }
+.mini-stat__label { font-size: 12px; color: #909399; margin-top: 4px; }
+
+.card-title { font-weight: 600; font-size: 15px; }
+
+.upload-card :deep(.el-upload-dragger) {
+  border: 2px dashed #dcdfe6; border-radius: 10px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  min-height: 280px; display: flex; align-items: center; justify-content: center;
+}
+.upload-card :deep(.el-upload-dragger):hover {
+  border-color: #409EFF;
+  box-shadow: 0 0 0 4px rgba(64,158,255,0.1);
+}
+
+.upload-inner { display: flex; flex-direction: column; align-items: center; }
+.upload-art { margin-bottom: 12px; opacity: 0.7; }
 </style>

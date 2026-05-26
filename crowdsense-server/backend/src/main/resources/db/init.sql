@@ -10,6 +10,7 @@ CREATE TABLE sys_user (
     email VARCHAR(100),
     phone VARCHAR(20),
     avatar VARCHAR(255),
+    role VARCHAR(20) DEFAULT 'user',
     status TINYINT DEFAULT 1,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -60,9 +61,9 @@ CREATE TABLE sys_role_permission (
     UNIQUE KEY uk_role_permission (role_id, permission_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO sys_user (id, username, password, real_name, email, status) VALUES
-(1, 'admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '超级管理员', 'admin@example.com', 1),
-(2, 'user', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '普通用户', 'user@example.com', 1);
+INSERT INTO sys_user (id, username, password, real_name, email, role, status) VALUES
+(1, 'admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '超级管理员', 'admin@example.com', 'admin', 1),
+(2, 'user', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '普通用户', 'user@example.com', 'user', 1);
 
 INSERT INTO sys_role (id, role_code, role_name, description) VALUES
 (1, 'admin', '超级管理员', '拥有系统所有权限'),
@@ -80,6 +81,7 @@ INSERT INTO sys_role_permission (role_id, permission_id) VALUES (1, 1), (1, 2), 
 DROP TABLE IF EXISTS inference_task;
 CREATE TABLE inference_task (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
     image_name VARCHAR(255),
     image_path VARCHAR(255),
     crowd_count INT,
@@ -88,5 +90,6 @@ CREATE TABLE inference_task (
     inference_time BIGINT,
     status VARCHAR(255),
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

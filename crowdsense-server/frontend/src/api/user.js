@@ -18,3 +18,12 @@ export function deleteUser(id) {
 export function login(data) {
   return request({ url: '/auth/login', method: 'post', data })
 }
+export function register(data) {
+  return request({ url: '/auth/register', method: 'post', data })
+}
+export function getUserInfo() {
+  return request({ url: '/auth/info', method: 'get' })
+}
+export function getDetectionStats() {
+  return request({ url: '/users/detection-stats', method: 'get' })
+}

@@ -3,8 +3,11 @@ package com.example.crowdsenseserver.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.crowdsenseserver.entity.InferenceTask;
+import com.example.crowdsenseserver.entity.SysUser;
+import com.example.crowdsenseserver.security.UserDetailsServiceImpl;
 import com.example.crowdsenseserver.service.InferenceTaskService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -16,6 +19,15 @@ public class InferenceTaskController {
 
     @Autowired
     private InferenceTaskService inferenceTaskService;
+
+    @Autowired
+    private UserDetailsServiceImpl userDetailsService;
+
+    private Long getCurrentUserId() {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        SysUser user = userDetailsService.getSysUser(username);
+        return user.getId();
+    }
 
     @GetMapping
     public Map<String, Object> list(
@@ -30,7 +42,9 @@ public class InferenceTaskController {
         Page<InferenceTask> page = new Page<>(current, size);
         LambdaQueryWrapper<InferenceTask> wrapper = new LambdaQueryWrapper<>();
 
-        // 动态查询条件
+        // Only return current user's tasks
+        wrapper.eq(InferenceTask::getUserId, getCurrentUserId());
+
         if (imageName != null && !imageName.isEmpty()) {
             wrapper.like(InferenceTask::getImageName, imageName);
         }

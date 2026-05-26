@@ -2,10 +2,13 @@ package com.example.crowdsenseserver.controller;
 
 import com.example.crowdsenseserver.config.AppProperties;
 import com.example.crowdsenseserver.entity.InferenceTask;
+import com.example.crowdsenseserver.entity.SysUser;
+import com.example.crowdsenseserver.security.UserDetailsServiceImpl;
 import com.example.crowdsenseserver.service.InferenceTaskService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
@@ -34,13 +37,16 @@ public class InferenceController {
     private final AppProperties appProperties;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final UserDetailsServiceImpl userDetailsService;
     private String baseDir;
 
-    public InferenceController(InferenceTaskService inferenceTaskService, AppProperties appProperties) {
+    public InferenceController(InferenceTaskService inferenceTaskService, AppProperties appProperties,
+                               UserDetailsServiceImpl userDetailsService) {
         this.inferenceTaskService = inferenceTaskService;
         this.appProperties = appProperties;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
+        this.userDetailsService = userDetailsService;
     }
 
     @PostConstruct
@@ -65,8 +71,13 @@ public class InferenceController {
             return result;
         }
 
+        // Get current user
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        SysUser currentUser = userDetailsService.getSysUser(username);
+
         // Create task record
         InferenceTask task = new InferenceTask();
+        task.setUserId(currentUser.getId());
         task.setImageName(file.getOriginalFilename());
         task.setStatus("PENDING");
         task.setCreateTime(LocalDateTime.now());
