@@ -7,12 +7,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
     private Upload upload = new Upload();
-    private Model model = new Model();
 
     public Upload getUpload() { return upload; }
     public void setUpload(Upload upload) { this.upload = upload; }
-    public Model getModel() { return model; }
-    public void setModel(Model model) { this.model = model; }
 
     public static class Upload {
         private String dir = "uploads/images";
@@ -24,10 +21,4 @@ public class AppProperties {
         public void setDensityDir(String densityDir) { this.densityDir = densityDir; }
     }
 
-    public static class Model {
-        private String path = "classpath:models/resnet_fpn.onnx";
-
-        public String getPath() { return path; }
-        public void setPath(String path) { this.path = path; }
-    }
 }

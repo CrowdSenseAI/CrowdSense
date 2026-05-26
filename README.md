@@ -39,16 +39,18 @@ mysql -u root -p --default-character-set=utf8mb4 < crowdsense-server/backend/src
 
 默认账号: `admin` / `123456`，`user` / `123456`
 
-### 2. 下载模型权重
+### 2. 获取模型权重
 
-模型权重文件未包含在仓库中（GitHub 限制），请从以下方式获取：
+模型权重文件未包含在仓库中，请向项目维护者索取或自行训练。
+
+**下载后放置路径**：
+
+```
+algo/DM-Count/saved_models/resnet_fpn_best_mae98.pth
+```
 
 ```bash
-# 方式一：从网盘下载（推荐）
-# 链接: <上传后填写>
-# 下载 resnet_fpn_best_mae98.pth 放到 algo/DM-Count/saved_models/
-
-# 方式二：自己训练
+# 自行训练（如未获取预训练权重）
 cd algo/DM-Count
 uv run python train.py
 ```
