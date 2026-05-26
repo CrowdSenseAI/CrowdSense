@@ -4,7 +4,6 @@
       <template #header>
         <div class="card-header">
           <span>角色管理</span>
-          <el-button type="primary" @click="handleAdd" :icon="Plus">新增</el-button>
         </div>
       </template>
 
@@ -41,11 +40,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right" align="center">
+        <el-table-column label="操作" width="150" fixed="right" align="center">
           <template #default="scope">
             <el-button size="small" @click="handleView(scope.row)" :icon="View">查看</el-button>
             <el-button size="small" type="primary" @click="handleEdit(scope.row)" :icon="Edit">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(scope.row)" :icon="Delete">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -67,13 +65,16 @@
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" destroy-on-close>
       <el-form :model="formData" ref="formRef" label-width="100px" :rules="formRules">
         <el-form-item label="角色编码" prop="roleCode">
-          <el-input v-model="formData.roleCode" placeholder="请输入角色编码" />
+          <el-select v-model="formData.roleCode" placeholder="请选择角色编码" style="width: 100%">
+            <el-option value="admin" label="admin（超级管理员）" />
+            <el-option value="user" label="user（普通用户）" />
+          </el-select>
         </el-form-item>
         <el-form-item label="角色名称" prop="roleName">
           <el-input v-model="formData.roleName" placeholder="请输入角色名称" />
         </el-form-item>
-        <el-form-item label="描述" prop="description">
-          <el-input v-model="formData.description" placeholder="请输入描述" />
+        <el-form-item label="描述">
+          <el-input v-model="formData.description" placeholder="请输入描述" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="状态" prop="status">
           <el-select v-model="formData.status" placeholder="请选择状态" style="width: 100%">
@@ -108,22 +109,15 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, RefreshRight, View, Edit, Delete } from '@element-plus/icons-vue'
-import {
-  getRoleList,
-  getRoleById,
-  createRole,
-  updateRole,
-  deleteRole
-} from '../api/role'
+import { ElMessage } from 'element-plus'
+import { Search, RefreshRight, View, Edit } from '@element-plus/icons-vue'
+import { getRoleList, getRoleById, updateRole } from '../api/role'
 
 const loading = ref(false)
 const list = ref([])
 const dialogVisible = ref(false)
 const viewDialogVisible = ref(false)
-const dialogTitle = ref('新增')
-const isEdit = ref(false)
+const dialogTitle = ref('编辑角色')
 const submitLoading = ref(false)
 const formRef = ref()
 
@@ -148,10 +142,9 @@ const formData = ref({
 })
 
 const formRules = {
-  roleCode: [{ required: true, message: '请输入角色编码', trigger: 'blur' }],
+  roleCode: [{ required: true, message: '请选择角色编码', trigger: 'change' }],
   roleName: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
-  description: [{ required: true, message: '请输入描述', trigger: 'blur' }],
-  status: [{ required: true, message: '请输入状态', trigger: 'blur' }]
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }]
 }
 
 const loadData = async () => {
@@ -196,18 +189,6 @@ const handleCurrentChange = (current) => {
   loadData()
 }
 
-const handleAdd = () => {
-  isEdit.value = false
-  dialogTitle.value = '新增'
-  formData.value = {
-  roleCode: '',
-  roleName: '',
-  description: '',
-  status: 1
-  }
-  dialogVisible.value = true
-}
-
 const handleView = async (row) => {
   try {
     const res = await getRoleById(row.id)
@@ -219,25 +200,8 @@ const handleView = async (row) => {
 }
 
 const handleEdit = (row) => {
-  isEdit.value = true
-  dialogTitle.value = '编辑'
   formData.value = { ...row }
   dialogVisible.value = true
-}
-
-const handleDelete = async (row) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该角色吗？删除后不可恢复！', '确认删除', {
-      type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消'
-    })
-    await deleteRole(row.id)
-    ElMessage.success('删除成功')
-    loadData()
-  } catch (error) {
-    if (error !== 'cancel') ElMessage.error('删除失败')
-  }
 }
 
 const handleSubmit = async () => {
@@ -248,17 +212,12 @@ const handleSubmit = async () => {
   }
   submitLoading.value = true
   try {
-    if (isEdit.value) {
-      await updateRole(formData.value.id, formData.value)
-      ElMessage.success('更新成功')
-    } else {
-      await createRole(formData.value)
-      ElMessage.success('创建成功')
-    }
+    await updateRole(formData.value.id, formData.value)
+    ElMessage.success('更新成功')
     dialogVisible.value = false
     loadData()
   } catch (error) {
-    ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
+    ElMessage.error('更新失败')
   } finally {
     submitLoading.value = false
   }

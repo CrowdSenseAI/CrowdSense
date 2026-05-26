@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 public class InferenceTask {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long userId;
     private String imageName;  // 图片文件名
     private String imagePath;  // 图片存储路径
     private Integer crowdCount;  // 预测人数

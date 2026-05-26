@@ -12,8 +12,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/auth")
@@ -44,16 +43,16 @@ public class AuthController {
         try {
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username, password));
-            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-            Map<String, Object> claims = new HashMap<>();
-            claims.put("username", username);
-            String token = jwtUtils.generateToken(
-                    userDetailsService.getSysUser(username).getId(), username, claims);
+            SysUser sysUser = userDetailsService.getSysUser(username);
+            String token = jwtUtils.generateToken(sysUser.getId(), username, new HashMap<>());
             result.put("code", 200);
             result.put("message", "登录成功");
             Map<String, Object> data = new HashMap<>();
             data.put("token", token);
             data.put("username", username);
+            data.put("realName", sysUser.getRealName());
+            data.put("email", sysUser.getEmail());
+            data.put("role", sysUser.getRole());
             result.put("data", data);
         } catch (Exception e) {
             result.put("code", 401);
@@ -80,6 +79,7 @@ public class AuthController {
         user.setPassword(passwordEncoder.encode(password));
         user.setRealName(registerData.getOrDefault("realName", username));
         user.setEmail(registerData.get("email"));
+        user.setRole("user");
         user.setStatus(1);
         sysUserService.save(user);
 
@@ -102,9 +102,12 @@ public class AuthController {
         result.put("code", 200);
         result.put("message", "success");
         Map<String, Object> data = new HashMap<>();
+        data.put("id", user.getId());
         data.put("username", user.getUsername());
         data.put("realName", user.getRealName());
-        data.put("roles", new String[]{"admin"});
+        data.put("email", user.getEmail());
+        data.put("phone", user.getPhone());
+        data.put("role", user.getRole());
         data.put("name", user.getRealName() != null ? user.getRealName() : user.getUsername());
         result.put("data", data);
         return result;

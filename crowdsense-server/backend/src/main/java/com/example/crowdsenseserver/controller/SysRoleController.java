@@ -21,11 +21,19 @@ public class SysRoleController {
     public Map<String, Object> list(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String roleCode,
+            @RequestParam(required = false) String roleName,
+            @RequestParam(required = false) Integer status) {
         Page<SysRole> page = new Page<>(current, size);
         LambdaQueryWrapper<SysRole> wrapper = new LambdaQueryWrapper<>();
-        if (keyword != null && !keyword.isEmpty()) {
-            // 关键词查询条件
+        if (roleCode != null && !roleCode.isEmpty()) {
+            wrapper.like(SysRole::getRoleCode, roleCode);
+        }
+        if (roleName != null && !roleName.isEmpty()) {
+            wrapper.like(SysRole::getRoleName, roleName);
+        }
+        if (status != null) {
+            wrapper.eq(SysRole::getStatus, status);
         }
         Page<SysRole> result = sysRoleService.page(page, wrapper);
         Map<String, Object> map = new HashMap<>();
