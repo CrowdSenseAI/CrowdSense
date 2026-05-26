@@ -57,14 +57,23 @@ def load_model():
 
 
 def analyze_density_level(density_map):
-    """Classify density level — matches demo.py logic."""
+    """Classify by local density map values — correlates with 人/m².
+
+    Uses max pixel value after Gaussian smoothing as the crowding indicator.
+    Since the density map is normalized per-pixel, max_val reflects the
+    most crowded local region's density, analogous to national safety
+    standard (人/m²) at the model's learned spatial scale.
+
+    Thresholds calibrated against DM-Count output range on QNRF.
+    """
     smoothed = cv2.GaussianBlur(density_map, (15, 15), 0)
     max_val = float(np.max(smoothed))
-    if max_val < 0.01:
+
+    if max_val < 0.02:
         return "低密度 Low", "green", (0, 255, 0, 255)
-    elif max_val < 0.05:
+    elif max_val < 0.06:
         return "正常密度 Normal", "orange", (0, 255, 255, 255)
-    elif max_val < 0.12:
+    elif max_val < 0.15:
         return "密集 Dense", "orangered", (0, 165, 255, 255)
     else:
         return "极度拥挤 Crowded", "red", (0, 0, 255, 255)
